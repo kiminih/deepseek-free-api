@@ -593,7 +593,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           let content = result.choices[0].delta.content;
           content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
             const citation = citationLinks[parseInt(citationIndex)];
-            return citation ? `[![${citation.site_name}](${citation.site_icon} "${citation.title}")](${citation.url})` : match;
+            return citation ? `[\[\"${citation.site_name}\"\]](${citation.url})` : match;
           });
           data.choices[0].message.content += content;
         }
@@ -719,7 +719,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         let content = result.choices[0].delta.content;
         content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
           const citation = citationLinks[parseInt(citationIndex)];
-          return citation ? `[![${citation.site_name}](${citation.site_icon} "${citation.title}")](${citation.url})` : match;
+          return citation ? `[\[\"${citation.site_name}\"\]](${citation.url})` : match;
         });
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
