@@ -671,9 +671,25 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       if (result.choices[0].delta.type === "search_result" && !isSilentModel) {
         const searchResults = result.choices[0]?.delta?.search_results || [];
         refContent += searchResults.map((item, index) => {
-          citationLinks[index + 1] = { title: item.title,site_icon: item.site_icon, site_name: item.site_name, url: item.url }; // 存储标题和链接
-          return `来源${index + 1}: [${item.title}](${item.url})`;
-        }).join('\n') + '\n\n';
+          citationLinks[index + 1] = { title: item.title, site_icon: item.site_icon, site_name: item.site_name, url: item.url }; // 存储标题和链接
+          return `${index + 1}: [\[${item.site_name}\]${item.title}](${item.url})`;
+        }).join('\n\n') + '\n\n';
+
+        // 先输出搜索结果
+        transStream.write(`data: ${JSON.stringify({
+          id: `${refConvId}@${result.message_id}`,
+          model: result.model,
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: refContent },
+              finish_reason: null,
+            },
+          ],
+          created,
+        })}\n\n`);
+
         return;
       }
 
@@ -687,7 +703,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
             choices: [
               {
                 index: 0,
-                delta: { role: "assistant", content: isFoldModel ? "<details><summary>思考过程</summary><pre>" : "```思考过程\n" },
+                delta: { role: "assistant", content: isFoldModel ? "<details><summary>思考过程</summary><pre>" : "```Think\n" },
                 finish_reason: null,
               },
             ],
