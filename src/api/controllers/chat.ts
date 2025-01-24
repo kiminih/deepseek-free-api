@@ -632,8 +632,10 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
   const isSilentModel = model.includes('silent');
   const isFoldModel = model.includes('fold');
   logger.info(`模型: ${model}, 是否思考: ${isThinkingModel}, 是否联网搜索: ${isSearchModel}, 是否静默思考: ${isSilentModel}, 是否折叠思考: ${isFoldModel}`);
+  
   // 消息创建时间
   const created = util.unixTimestamp();
+  
   // 创建转换流
   const transStream = new PassThrough();
   !transStream.closed &&
@@ -671,8 +673,10 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       if (result.choices[0].delta.type === "search_result" && !isSilentModel) {
         const searchResults = result.choices[0]?.delta?.search_results || [];
         refContent += searchResults.map((item, index) => {
-          citationLinks[index + 1] = { title: item.title, site_icon: item.site_icon, site_name: item.site_name, url: item.url }; // 存储标题和链接
-          return `${index + 1}: [\[${item.site_name}\]${item.title}](${item.url})`;
+          // 如果 site_name 为空，则输出 "外部引用"
+          const siteName = item.site_name || "外部引用";
+          citationLinks[index + 1] = { title: item.title, site_icon: item.site_icon, site_name: siteName, url: item.url }; // 存储标题和链接
+          return `${index + 1}: [\[${siteName}\]${item.title}](${item.url})`;
         }).join('\n\n') + '\n\n';
 
         // 先输出搜索结果
@@ -733,9 +737,10 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       if (result.choices[0].delta.content) {
         // 替换 [citation:x] 为对应的 Markdown 格式
         let content = result.choices[0].delta.content;
+        // 处理每个[citation:x]，收集所有引用信息
         content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
           const citation = citationLinks[parseInt(citationIndex)];
-          return citation ? `[\[\"${citation.site_name}\"\]](${citation.url})` : match;
+          return citation ? ` \[${citationIndex}\][${citation.site_name}](${citation.url})` : match;
         });
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
