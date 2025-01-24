@@ -536,6 +536,8 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
   const isFoldModel = model.includes('fold');
   logger.info(`模型: ${model}, 是否思考: ${isThinkingModel} 是否联网搜索: ${isSearchModel}, 是否静默思考: ${isSilentModel}, 是否折叠思考: ${isFoldModel}`);
   let refContent = '';
+  const citationLinks: Record<number, string> = {}; // 存储 [citation:x] 到链接的映射
+
   return new Promise((resolve, reject) => {
     // 消息初始化
     const data = {
@@ -563,11 +565,17 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           return;
         if (!data.id)
           data.id = `${refConvId}@${result.message_id}`;
+        
+        // 处理搜索结果并构建引用链接
         if (result.choices[0].delta.type === "search_result" && !isSilentModel) {
           const searchResults = result.choices[0]?.delta?.search_results || [];
-          refContent += searchResults.map(item => `${item.title} - ${item.url}`).join('\n');
+          refContent += searchResults.map((item, index) => {
+            citationLinks[index + 1] = item.url;  // 使用编号创建引用链接映射
+            return `来源${index + 1}: ${item.title} - ${item.url}`;
+          }).join('\n') + '\n\n';
           return;
         }
+        
         if (result.choices[0].delta.type === "thinking") {
           if (!thinking && isThinkingModel && !isSilentModel) {
             thinking = true;
@@ -580,8 +588,15 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           thinking = false;
           data.choices[0].message.content += isFoldModel ? "</pre></details>" : "\n\n[思考结束]\n";
         }
-        if (result.choices[0].delta.content)
-          data.choices[0].message.content += result.choices[0].delta.content;
+        if (result.choices[0].delta.content) {
+          // 替换 [citation:x] 为对应的链接
+          let content = result.choices[0].delta.content;
+          content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
+            const link = citationLinks[parseInt(citationIndex)];
+            return link ? `（来源：${link}）` : match;
+          });
+          data.choices[0].message.content += content;
+        }
         if (result.choices && result.choices[0] && result.choices[0].finish_reason === "stop") {
           data.choices[0].message.content = data.choices[0].message.content.replace(/^\n+/, '').replace(/\[citation:\d+\]/g, '') + (refContent ? `\n\n搜索结果来自：\n${refContent}` : '');
           resolve(data);
@@ -605,6 +620,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
  *
  * @param model 模型名称
  * @param stream 消息流
+ * @param refConvId 引用对话ID
  * @param endCallback 传输结束回调
  */
 function createTransStream(model: string, stream: any, refConvId: string, endCallback?: Function) {
@@ -634,6 +650,11 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         created,
       })}\n\n`
     );
+  
+  // 存储 [citation:x] 到链接的映射
+  const citationLinks: Record<number, string> = {};
+  let refContent = ''; // 存储来源链接内容
+
   const parser = createParser((event) => {
     try {
       if (event.type !== "event" || event.data.trim() == "[DONE]") return;
@@ -644,25 +665,17 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       if (!result.choices || !result.choices[0] || !result.choices[0].delta)
         return;
       result.model = model;
+
+      // 处理搜索结果并构建引用链接
       if (result.choices[0].delta.type === "search_result" && !isSilentModel) {
         const searchResults = result.choices[0]?.delta?.search_results || [];
-        if (searchResults.length > 0) {
-          const refContent = searchResults.map(item => `检索 ${item.title} - ${item.url}`).join('\n') + '\n\n';
-          transStream.write(`data: ${JSON.stringify({
-            id: `${refConvId}@${result.message_id}`,
-            model: result.model,
-            object: "chat.completion.chunk",
-            choices: [
-              {
-                index: 0,
-                delta: { role: "assistant", content: refContent },
-                finish_reason: null,
-              },
-            ],
-          })}\n\n`);
-        }
+        refContent += searchResults.map((item, index) => {
+          citationLinks[index + 1] = item.url;  // 使用编号创建引用链接映射
+          return `来源${index + 1}: ${item.title} - ${item.url}`;
+        }).join('\n') + '\n\n';
         return;
       }
+
       if (result.choices[0].delta.type === "thinking") {
         if (!thinking && isThinkingModel && !isSilentModel) {
           thinking = true;
@@ -700,22 +713,28 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         })}\n\n`);
       }
 
-      if (!result.choices[0].delta.content)
-        return;
+      if (result.choices[0].delta.content) {
+        // 替换 [citation:x] 为对应的链接
+        let content = result.choices[0].delta.content;
+        content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
+          const link = citationLinks[parseInt(citationIndex)];
+          return link ? `（来源：${link}）` : match;
+        });
+        transStream.write(`data: ${JSON.stringify({
+          id: `${refConvId}@${result.message_id}`,
+          model: result.model,
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content },
+              finish_reason: null,
+            },
+          ],
+          created,
+        })}\n\n`);
+      }
 
-      transStream.write(`data: ${JSON.stringify({
-        id: `${refConvId}@${result.message_id}`,
-        model: result.model,
-        object: "chat.completion.chunk",
-        choices: [
-          {
-            index: 0,
-            delta: { role: "assistant", content: result.choices[0].delta.content.replace(/\[citation:\d+\]/g, '') },
-            finish_reason: null,
-          },
-        ],
-        created,
-      })}\n\n`);
       if (result.choices && result.choices[0] && result.choices[0].finish_reason === "stop") {
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
@@ -738,6 +757,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       !transStream.closed && transStream.end("data: [DONE]\n\n");
     }
   });
+
   // 将流数据喂给SSE转换器
   stream.on("data", (buffer) => parser.feed(buffer.toString()));
   stream.once(
