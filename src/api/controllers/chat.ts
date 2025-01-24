@@ -554,6 +554,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       created: util.unixTimestamp(),
     };
+
     const parser = createParser((event) => {
       try {
         if (event.type !== "event" || event.data.trim() == "[DONE]") return;
@@ -563,19 +564,20 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           throw new Error(`Stream response invalid: ${event.data}`);
         if (!result.choices || !result.choices[0] || !result.choices[0].delta)
           return;
+
         if (!data.id)
           data.id = `${refConvId}@${result.message_id}`;
-        
+
         // 处理搜索结果并构建引用链接
         if (result.choices[0].delta.type === "search_result" && !isSilentModel) {
           const searchResults = result.choices[0]?.delta?.search_results || [];
           refContent += searchResults.map((item, index) => {
             citationLinks[index + 1] = item.url;  // 使用编号创建引用链接映射
-            return `来源${index + 1}: ${item.title} - ${item.url}`;
+            return `来源${index + 1}: [${item.title}](${item.url})`;
           }).join('\n') + '\n\n';
           return;
         }
-        
+
         if (result.choices[0].delta.type === "thinking") {
           if (!thinking && isThinkingModel && !isSilentModel) {
             thinking = true;
@@ -588,15 +590,17 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           thinking = false;
           data.choices[0].message.content += isFoldModel ? "</pre></details>" : "\n\n[思考结束]\n";
         }
+
         if (result.choices[0].delta.content) {
           // 替换 [citation:x] 为对应的链接
           let content = result.choices[0].delta.content;
           content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
             const link = citationLinks[parseInt(citationIndex)];
-            return link ? `（来源：${link}）` : match;
+            return link ? `（来源：[${citationLinks[citationIndex]}](${link})）` : match;
           });
           data.choices[0].message.content += content;
         }
+
         if (result.choices && result.choices[0] && result.choices[0].finish_reason === "stop") {
           data.choices[0].message.content = data.choices[0].message.content.replace(/^\n+/, '').replace(/\[citation:\d+\]/g, '') + (refContent ? `\n\n搜索结果来自：\n${refContent}` : '');
           resolve(data);
@@ -606,6 +610,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
         reject(err);
       }
     });
+
     // 将流数据喂给SSE转换器
     stream.on("data", (buffer) => parser.feed(buffer.toString()));
     stream.once("error", (err) => reject(err));
@@ -671,7 +676,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         const searchResults = result.choices[0]?.delta?.search_results || [];
         refContent += searchResults.map((item, index) => {
           citationLinks[index + 1] = item.url;  // 使用编号创建引用链接映射
-          return `来源${index + 1}: ${item.title} - ${item.url}`;
+          return `来源${index + 1}: [${item.title}](${item.url})`;
         }).join('\n') + '\n\n';
         return;
       }
@@ -718,7 +723,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         let content = result.choices[0].delta.content;
         content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
           const link = citationLinks[parseInt(citationIndex)];
-          return link ? `（来源：${link}）` : match;
+          return link ? `（来源：[${citationLinks[citationIndex]}](${link})）` : match;
         });
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
