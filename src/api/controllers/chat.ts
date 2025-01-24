@@ -655,9 +655,8 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         created,
       })}\n\n`
     );
-  
-  // 存储 [citation:x] 到链接的映射
-  const citationLinks: Record<number, string> = {};
+
+  const citationLinks: Record<number, { title: string; url: string }> = {}; // 存储 [citation:x] 到标题和链接的映射
   let refContent = ''; // 存储来源链接内容
 
   const parser = createParser((event) => {
@@ -675,7 +674,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       if (result.choices[0].delta.type === "search_result" && !isSilentModel) {
         const searchResults = result.choices[0]?.delta?.search_results || [];
         refContent += searchResults.map((item, index) => {
-          citationLinks[index + 1] = item.url;  // 使用编号创建引用链接映射
+          citationLinks[index + 1] = { title: item.title, url: item.url }; // 存储标题和链接
           return `来源${index + 1}: [${item.title}](${item.url})`;
         }).join('\n') + '\n\n';
         return;
@@ -719,11 +718,11 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       }
 
       if (result.choices[0].delta.content) {
-        // 替换 [citation:x] 为对应的链接
+        // 替换 [citation:x] 为对应的 Markdown 格式
         let content = result.choices[0].delta.content;
         content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
-          const link = citationLinks[parseInt(citationIndex)];
-          return link ? `（来源：[${citationLinks[citationIndex]}](${link})）` : match;
+          const citation = citationLinks[parseInt(citationIndex)];
+          return citation ? `（来源：[${citation.title}](${citation.url})）` : match;
         });
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
