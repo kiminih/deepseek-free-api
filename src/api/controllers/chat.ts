@@ -536,7 +536,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
   const isFoldModel = model.includes('fold');
   logger.info(`模型: ${model}, 是否思考: ${isThinkingModel}, 是否联网搜索: ${isSearchModel}, 是否静默思考: ${isSilentModel}, 是否折叠思考: ${isFoldModel}`);
   let refContent = '';
-  const citationLinks: Record<number, { title: string; url: string }> = {}; // 存储 [citation:x] 到标题和链接的映射
+  const citationLinks: Record<number, { title: string; site_icon: string; site_name: string; url: string }> = {}; // 存储 [citation:x] 到标题和链接的映射
 
   return new Promise((resolve, reject) => {
     // 消息初始化
@@ -570,7 +570,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           const searchResults = result.choices[0]?.delta?.search_results || [];
           refContent += searchResults
             .map((item, index) => {
-              citationLinks[index + 1] = { title: item.title, url: item.url }; // 存储标题和链接
+              citationLinks[index + 1] = { title: item.title, site_icon: item.site_icon, site_name: item.site_name, url: item.url }; // 存储标题和链接
               return `来源${index + 1}: [${item.title}](${item.url})`;
             })
             .join('\n') + '\n\n';
@@ -593,7 +593,7 @@ async function receiveStream(model: string, stream: any, refConvId?: string): Pr
           let content = result.choices[0].delta.content;
           content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
             const citation = citationLinks[parseInt(citationIndex)];
-            return citation ? `（"[${citation.title}](${citation.url})）` : match;
+            return citation ? `[![${citation.site_name}](${citation.site_icon} "${citation.title}")](${citation.url})` : match;
           });
           data.choices[0].message.content += content;
         }
@@ -653,7 +653,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       })}\n\n`
     );
 
-  const citationLinks: Record<number, { title: string; url: string }> = {}; // 存储 [citation:x] 到标题和链接的映射
+  const citationLinks: Record<number, { title: string; site_icon: string; site_name: string; url: string }> = {}; // 存储 [citation:x] 到标题和链接的映射
   let refContent = ''; // 存储来源链接内容
 
   const parser = createParser((event) => {
@@ -671,7 +671,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
       if (result.choices[0].delta.type === "search_result" && !isSilentModel) {
         const searchResults = result.choices[0]?.delta?.search_results || [];
         refContent += searchResults.map((item, index) => {
-          citationLinks[index + 1] = { title: item.title, url: item.url }; // 存储标题和链接
+          citationLinks[index + 1] = { title: item.title,site_icon: item.site_icon, site_name: item.site_name, url: item.url }; // 存储标题和链接
           return `来源${index + 1}: [${item.title}](${item.url})`;
         }).join('\n') + '\n\n';
         return;
@@ -719,7 +719,7 @@ function createTransStream(model: string, stream: any, refConvId: string, endCal
         let content = result.choices[0].delta.content;
         content = content.replace(/\[citation:(\d+)\]/g, (match, citationIndex) => {
           const citation = citationLinks[parseInt(citationIndex)];
-          return citation ? `（"[${citation.title}](${citation.url})）` : match;
+          return citation ? `[![${citation.site_name}](${citation.site_icon} "${citation.title}")](${citation.url})` : match;
         });
         transStream.write(`data: ${JSON.stringify({
           id: `${refConvId}@${result.message_id}`,
